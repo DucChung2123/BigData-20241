@@ -18,7 +18,7 @@ default_args = {
 }
 with DAG(
     dag_id='bicycle_data_pipeline',
-    schedule_interval="0 0 1 * *",
+    schedule_interval="0 0 * * *",
     default_args=default_args,
     catchup=False,
     tags=['bicycle_data', 'hdfs', 'spark', 'postgres'],
