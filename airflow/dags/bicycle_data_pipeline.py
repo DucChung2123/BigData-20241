@@ -4,9 +4,6 @@ from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOpe
 from airflow.operators.python import PythonOperator
 from datetime import datetime, timedelta, date
 import requests
-from pytz import timezone
-
-local_tz = timezone('Asia/Ho_Chi_Minh')
 
 processing_date = date.today().strftime("%Y-%m-%d")
 
