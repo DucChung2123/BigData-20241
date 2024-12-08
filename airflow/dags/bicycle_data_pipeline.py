@@ -2,36 +2,30 @@ from airflow import DAG
 from airflow.providers.http.operators.http import SimpleHttpOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import requests
-from airflow.models import Variable
+from pytz import timezone
 
-if not Variable.get("processing_date", default_var=None):
-    Variable.set("processing_date", "2023-12-07")
-    
-processing_date = Variable.get("processing_date")
-# DAG Default arguments
+local_tz = timezone('Asia/Ho_Chi_Minh')
+
+processing_date = date.today().strftime("%Y-%m-%d")
+
 default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 3,
-    'retry_delay': timedelta(minutes=5),
+    "depends_on_past": False,
+    "start_date": datetime(2024, 10, 31),
+    "email": ["dangptpt@gmail.com"],
+    "email_on_failure": False,
+    "email_on_retry": False,
+    "retries": 3,
+    "retry_delay": 60,
 }
-
-
-# DAG Definition
 with DAG(
-    'bicycle_data_pipeline',
+    dag_id='bicycle_data_pipeline',
+    schedule_interval="0 0 1 * *",
     default_args=default_args,
-    description='ETL pipeline for processing bicycle theft data',
-    schedule_interval=None,  
-    start_date=datetime(2023, 1, 1),
     catchup=False,
     tags=['bicycle_data', 'hdfs', 'spark', 'postgres'],
 ) as dag:
-
     send_data_to_hdfs = SimpleHttpOperator( 
         task_id='send_data_to_hdfs',
         http_conn_id='data_ingestion_service',
