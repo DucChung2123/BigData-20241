@@ -1,3 +1,18 @@
+x-airflow-common: &airflow-common
+  build:
+    context: ./airflow/docker
+    dockerfile: Dockerfile
+  env_file:
+    - ./airflow/airflow.env
+  volumes:
+    - airflow-logs:/opt/airflow/logs
+    - ./airflow/dags:/opt/airflow/dags
+    - ./spark/jars:/opt/spark/jars
+    - ./spark/jobs:/opt/spark/app
+  depends_on:
+    - postgres
+  networks:
+    - airflow
 
 services:
   # PostgreSQL Database
@@ -12,130 +27,24 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data  
-
-  # Redis for CeleryExecutor
-  redis:
-    image: redis:7.2-bookworm
-    container_name: redis
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 30s
-      retries: 5
-    restart: always
+    networks:
+      - airflow
 
   # Airflow Webserver
   airflow-webserver:
-    build:
-      context: ./airflow/docker
-      dockerfile: Dockerfile
+    <<: *airflow-common
     container_name: airflow-webserver
     command: webserver
     ports:
       - "8090:8080"
-    environment:
-      AIRFLOW__EXECUTOR: CeleryExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin@postgres/crime
-      AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-      AIRFLOW__CORE__FERNET_KEY: ''
-      _AIRFLOW_DB_MIGRATE: 'true'
-      _AIRFLOW_WWW_USER_CREATE: 'true'
-      _AIRFLOW_WWW_USER_USERNAME: airflow
-      _AIRFLOW_WWW_USER_PASSWORD: airflow
-      AIRFLOW_CONN_DATA_INGESTION_SERVICE: http://data_ingestion_service:8000
-      AIRFLOW_CONN_SPARK_DEFAULT: spark://spark-master:7077
     depends_on:
-      - redis
-      - postgres
-      - airflow-init
-    volumes:
-      - ./spark/jars:/opt/airflow/jars
-      - ./spark/jobs:/opt/airflow/app
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/plugins:/opt/airflow/plugins
-      - airflow-logs:/opt/airflow/logs
+      - airflow-scheduler
 
   # Airflow Scheduler
   airflow-scheduler:
-    build:
-      context: ./airflow/docker
-      dockerfile: Dockerfile
-    container_name: airflow-scheduler
-    command: scheduler
-    depends_on:
-      airflow-init:
-        condition: service_healthy
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/plugins:/opt/airflow/plugins
-      - airflow-logs:/opt/airflow/logs
-    environment:
-      AIRFLOW__EXECUTOR: CeleryExecutor
-      AIRFLOW_CONN_SPARK_DEFAULT: spark://spark-master:7077
-      AIRFLOW_CONN_DATA_INGESTION_SERVICE: http://data_ingestion_service:8000
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin@postgres/crime
-
-
-  # Airflow Init Service
-  airflow-init:
-    build:
-      context: ./airflow/docker
-      dockerfile: Dockerfile
-    container_name: airflow-init
-    command: >
-      bash -c "
-      airflow db migrate &&
-      airflow users create \
-        --username airflow \
-        --password airflow \
-        --firstname Airflow \
-        --lastname Admin \
-        --role Admin \
-        --email admin@example.com
-      "
-    environment:
-      AIRFLOW__EXECUTOR: CeleryExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin@postgres/crime
-      AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-      AIRFLOW__CORE__FERNET_KEY: ''
-    depends_on:
-      - postgres
-      - redis
-    healthcheck:
-      test: ["CMD-SHELL", "airflow db check"]
-      interval: 10s
-      timeout: 30s
-      retries: 5
-
-
-  # Airflow Worker
-  airflow-worker:
-    build:
-      context: ./airflow/docker
-      dockerfile: Dockerfile
-    container_name: airflow-worker
-    command: celery --app airflow.executors.celery_executor worker --pool=solo --concurrency=1 --loglevel=info
-
-
-    depends_on:
-      - airflow-webserver
-      - redis
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/plugins:/opt/airflow/plugins
-      - airflow-logs:/opt/airflow/logs
-      - ./spark/jars:/opt/airflow/jars
-      - ./spark/jobs:/opt/airflow/app
-    environment:
-      AIRFLOW_CONN_SPARK_DEFAULT: spark://spark-master:7077
-      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-      AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://admin:admin@postgres/crime
-      AIRFLOW__CORE__FERNET_KEY: ''
-
-
+      <<: *airflow-common
+      container_name: airflow-scheduler
+      command: bash -c "airflow db migrate && airflow users create --username admin --firstname Yusuf --lastname Ganiyu --role Admin --email airscholar@gmail.com --password admin && airflow scheduler"
 
   # Spark Master
   spark-master:
@@ -158,6 +67,8 @@ services:
     depends_on:
       - hdfs-namenode
       - postgres
+    networks:
+      - airflow
 
   # Spark Worker 1
   spark-worker-1:
@@ -178,6 +89,8 @@ services:
         limits:
           cpus: '2'
           memory: 1G
+    networks:
+      - airflow
 
   # Spark Worker 2
   spark-worker-2:
@@ -198,6 +111,8 @@ services:
         limits:
           cpus: '2'
           memory: 1G
+    networks:
+      - airflow
 
   # Spark Worker 3
   spark-worker-3:
@@ -218,6 +133,8 @@ services:
         limits:
           cpus: '2'
           memory: 1G
+    networks:
+      - airflow
 
   # HDFS Namenode
   hdfs-namenode:
@@ -233,6 +150,8 @@ services:
     ports:
       - "9870:9870"
       - "9000:9000"
+    networks:
+      - airflow
 
   # HDFS Datanodes
   hdfs-datanode-1:
@@ -251,6 +170,8 @@ services:
         limits:
           cpus: '1.0'
           memory: '2G'
+    networks:
+      - airflow
 
   hdfs-datanode-2:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -268,6 +189,8 @@ services:
         limits:
           cpus: '1.0'
           memory: '2G'
+    networks:
+      - airflow
 
   hdfs-datanode-3:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -285,6 +208,8 @@ services:
         limits:
           cpus: '1.0'
           memory: '2G'
+    networks:
+      - airflow
 
   # Data Ingestion Service
   data_ingestion_service:
@@ -301,7 +226,8 @@ services:
       - "8000:8000"
     volumes:
       - ./data_ingestion_service/src/data:/app/src/data  
-
+    networks:
+      - airflow
 volumes:
   postgres-data:
   airflow-logs:
@@ -311,3 +237,7 @@ volumes:
   hdfs-datanode-1:
   hdfs-datanode-2:
   hdfs-datanode-3:
+
+networks:
+  airflow:
+    driver: bridge

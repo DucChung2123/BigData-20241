@@ -47,12 +47,12 @@ with DAG(
 
     process_data_with_spark = SparkSubmitOperator(
         task_id='process_data_with_spark',
-        application='app/app.py',  
+        application='/opt/spark/app/app.py',  
         conn_id='spark_default',
         executor_cores=2,
-        executor_memory='2g',
+        executor_memory='1g',
         name='bicycle_data_processing',
-        jars='jars/postgresql-42.7.4.jar',
+        jars='/opt/spark/jars/postgresql-42.7.4.jar',
         verbose=True,
     )
 
