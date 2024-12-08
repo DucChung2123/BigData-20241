@@ -1,57 +1,60 @@
 from airflow import DAG
 from airflow.providers.http.operators.http import SimpleHttpOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
-from airflow.utils.dates import days_ago
+from airflow.operators.python import PythonOperator
+from datetime import datetime, timedelta
+import requests
 from airflow.models import Variable
-from datetime import datetime
 
-# Default arguments for the DAG
+if not Variable.get("processing_date", default_var=None):
+    Variable.set("processing_date", "2023-12-07")
+    
+processing_date = Variable.get("processing_date")
+# DAG Default arguments
 default_args = {
     'owner': 'airflow',
-    'start_date': days_ago(1),
-    'retries': 1,
+    'depends_on_past': False,
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 3,
+    'retry_delay': timedelta(minutes=5),
 }
 
-# Define the DAG
+
+# DAG Definition
 with DAG(
-    dag_id='bicycle_data_pipeline',
+    'bicycle_data_pipeline',
     default_args=default_args,
-    schedule_interval=None,  # Trigger manually
+    description='ETL pipeline for processing bicycle theft data',
+    schedule_interval=None,  
+    start_date=datetime(2023, 1, 1),
     catchup=False,
+    tags=['bicycle_data', 'hdfs', 'spark', 'postgres'],
 ) as dag:
 
-    # 1. Get date for filtering data
-    # Option 1: Use Params (passed when triggering the DAG)
-    date_param = "{{ params.date }}"  # Pass this when triggering the DAG
-
-    # Option 2: Use Variables (set globally in Airflow Admin > Variables)
-    default_date = Variable.get("default_date", default_var=datetime.now().strftime('%Y-%m-%d'))
-
-    # Option 3: Use Macros (e.g., {{ ds }} for the execution date)
-    execution_date = "{{ ds }}"  # Automatically fetch DAG run execution date
-
-    # Task 1: Send data to HDFS via API
-    send_data_to_hdfs = SimpleHttpOperator(
+    send_data_to_hdfs = SimpleHttpOperator( 
         task_id='send_data_to_hdfs',
-        http_conn_id='data_ingestion_service',  # HTTP Connection ID
-        endpoint='/send_data_by_date',
-        method='POST',
-        data={
-            "date": date_param  # Change to `default_date` or `execution_date` if preferred
-        },
+        http_conn_id='data_ingestion_service',
+        endpoint=f"/send_data_by_date?date={processing_date}",  # Gửi date qua query
+        method='POST',  # POST vẫn hợp lệ nếu không có body
         headers={"Content-Type": "application/json"},
         response_check=lambda response: response.status_code == 200,
         log_response=True,
+        retries=3,
+        retry_delay=timedelta(minutes=2),
     )
 
-    # Task 2: Run Spark job to process data
-    run_spark_job = SparkSubmitOperator(
-        task_id='run_spark_job',
-        application='/opt/spark/app/app.py',  # Path to Spark job in the container
-        conn_id='spark_default',  # Spark connection ID
-        jars='/opt/spark/jars/postgresql-42.7.4.jar',  # JDBC driver
+
+    process_data_with_spark = SparkSubmitOperator(
+        task_id='process_data_with_spark',
+        application='app/app.py',  
+        conn_id='spark_default',
+        executor_cores=2,
+        executor_memory='2g',
+        name='bicycle_data_processing',
+        jars='jars/postgresql-42.7.4.jar',
         verbose=True,
     )
 
-    # Define task dependencies
-    send_data_to_hdfs >> run_spark_job
+
+    send_data_to_hdfs >> process_data_with_spark
